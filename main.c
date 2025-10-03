@@ -4,10 +4,13 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <time.h>
+#include <SDL2/SDL_ttf.h>
 
 #define WINDOW_WIDTH 800
 #define WINDOW_HEIGHT 600
 #define PLAYER_SPEED 5
+#define GRAVITY 1
+#define JUMP_STRENGTH 15
 #define ENEMY_SPEED 3
 #define MAP_WIDTH 25
 #define MAP_HEIGHT 19
@@ -21,13 +24,30 @@ int score = 0;
 int fase = 1;
 SDL_Rect porta = {WINDOW_WIDTH - 100, WINDOW_HEIGHT - 150, 60, 90};
 bool portaAtiva = false; 
+bool isJumping = false;
+int velY = 0;
 
 int main(int argc, char* args[]) {
     // --- Inicializações ---
     SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
     IMG_Init(IMG_INIT_PNG);
-    Mix_Music* musicas[MAX_FASES];
+    // Carregar fonte
+    SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO);
+    IMG_Init(IMG_INIT_PNG);
 
+    if (TTF_Init() < 0) {
+        printf("Erro ao inicializar SDL_ttf: %s\n", TTF_GetError());
+        return 1;
+    }
+
+    // Carregar a fonte com TTF_OpenFont
+    TTF_Font* fonte = TTF_OpenFont("assets/arial.TTF", 24);
+    if (!fonte) {
+        printf("Erro ao carregar fonte: %s\n", TTF_GetError());
+        return 1;
+    }
+
+    Mix_Music* musicas[MAX_FASES];
 
     // Inicializar sistema de áudio (44.1kHz, estéreo, buffer 2048)
     if (Mix_OpenAudio(44100, MIX_DEFAULT_FORMAT, 2, 2048) < 0) {
@@ -55,11 +75,12 @@ int main(int argc, char* args[]) {
     // --- Carregar Texturas ---
     SDL_Texture* playerTex = IMG_LoadTexture(ren, "assets/player.png");
     SDL_Texture* enemyTex  = IMG_LoadTexture(ren, "assets/enemy.png");
+    SDL_Texture* enemy1Tex  = IMG_LoadTexture(ren, "assets/enemy1.png");
     SDL_Texture* coinTex   = IMG_LoadTexture(ren, "assets/coin.png");
     SDL_Texture* tilemap1Tex = IMG_LoadTexture(ren, "assets/tile.png");//
     SDL_Texture* tilemap2Tex = IMG_LoadTexture(ren, "assets/tile1.jpeg");
     SDL_Texture* tilemap3Tex = IMG_LoadTexture(ren, "assets/tile2.png");
-
+    
     //---Carregar musicas por fase
     musicas[0] = Mix_LoadMUS("assets/fase1.mp3");
     musicas[1] = Mix_LoadMUS("assets/fase2.mp3");
@@ -77,6 +98,7 @@ int main(int argc, char* args[]) {
     // --- Criar Retângulos ---
     SDL_Rect player = {100, 500, 70, 70};
     SDL_Rect enemy  = {400, 500, 30, 30};
+    SDL_Rect enemy1 = {200, 200, 30, 30};
     SDL_Rect coin   = {200, 500, 30, 30};
     SDL_Rect sourceRect; // Posição do tile no spritesheet
     SDL_Rect destRect; //
@@ -87,6 +109,8 @@ int main(int argc, char* args[]) {
 
     int enemy_dx = (rand() % 3) - 1;
     int enemy_dy = (rand() % 3) - 1;
+    int enemy1_dx = (rand() % 3) - 1;
+    int enemy1_dy = (rand() % 3) - 1;
     int changeDirTimer = 0;
 
        // --- Carregar sprite da explosão ---
@@ -118,26 +142,49 @@ int main(int argc, char* args[]) {
             player.x -= PLAYER_SPEED;
         if (keystate[SDL_SCANCODE_RIGHT] && player.x < WINDOW_WIDTH - player.w)
             player.x += PLAYER_SPEED;
+        if (isJumping) {
+            player.y += velY;
+            velY += GRAVITY;
+        // Se o player tocar o "chão"
+        if (player.y >= 500) { // 500 = altura do chão (ajuste conforme seu mapa)
+            player.y = 500;
+            isJumping = false;
+            velY = 0;
+            }
+        }
         if (keystate[SDL_SCANCODE_UP] && player.y > 0)
             player.y -= PLAYER_SPEED;
         if (keystate[SDL_SCANCODE_DOWN] && player.y < WINDOW_HEIGHT - player.h)
             player.y += PLAYER_SPEED;
+        if (keystate[SDL_SCANCODE_SPACE] && !isJumping) {
+            isJumping = true;
+            velY = -JUMP_STRENGTH; // impulso inicial para cima
+        }
 
         if (changeDirTimer <= 0) {
             enemy_dx = (rand() % 3) - 1;
             enemy_dy = (rand() % 3) - 1;
-            changeDirTimer = 60;
+            enemy1_dx = (rand() % 3) - 1;
+            enemy1_dy = (rand() % 3) - 1;
+
+            changeDirTimer = 40;
         } else {
             changeDirTimer--;
         }
 
         enemy.x += enemy_dx * ENEMY_SPEED;
         enemy.y += enemy_dy * ENEMY_SPEED;
+        enemy1.x += enemy1_dx * ENEMY_SPEED;
+        enemy1.y += enemy1_dy * ENEMY_SPEED;
 
         if (enemy.x < 0) enemy.x = 0;
         if (enemy.x > WINDOW_WIDTH - enemy.w) enemy.x = WINDOW_WIDTH - enemy.w;
         if (enemy.y < 0) enemy.y = 0;
         if (enemy.y > WINDOW_HEIGHT - enemy.h) enemy.y = WINDOW_HEIGHT - enemy.h;
+        if (enemy1.x < 0) enemy1.x = 0;
+        if (enemy1.x > WINDOW_WIDTH - enemy1.w) enemy1.x = WINDOW_WIDTH - enemy1.w;
+        if (enemy1.y < 0) enemy1.y = 0;
+        if (enemy1.y > WINDOW_HEIGHT - enemy1.h) enemy1.y = WINDOW_HEIGHT - enemy1.h;
 
         // --- Colisão com moeda ---
         if (SDL_HasIntersection(&player, &coin)) {
@@ -151,7 +198,7 @@ int main(int argc, char* args[]) {
             coin.x = rand() % (WINDOW_WIDTH - coin.w);
             coin.y = rand() % (WINDOW_HEIGHT - coin.h);
 
-            // Ativar porta quando pegar 10 moedas
+            // Ativar porta quando pegar 3 moedas
             if (score >= COINS_TO_NEXT) {
                 portaAtiva = true;
             }
@@ -168,6 +215,8 @@ int main(int argc, char* args[]) {
 
             enemy.x = 400; 
             enemy.y = 500;
+            enemy1.x = 400; 
+            enemy1.y = 500;
 
             coin.x = rand() % (WINDOW_WIDTH - coin.w);
             coin.y = rand() % (WINDOW_HEIGHT - coin.h);
@@ -186,7 +235,7 @@ int main(int argc, char* args[]) {
             // --- Colisão com inimigo ---
         if (SDL_HasIntersection(&player, &enemy) && !explosionActive) {
             Mix_PlayChannel(-1, explosionSound, 0);
-        
+
             explosionActive = true;
             explosionFrame = 0;
             explosionPos.x = enemy.x;
@@ -196,9 +245,24 @@ int main(int argc, char* args[]) {
 
             player.x = 100;
             player.y = 500;
-            score -= 5;
-            if (score < 0) score = 0;
+            score = score > 5 ? score - 5 : 0;
         }
+
+        if (SDL_HasIntersection(&player, &enemy1) && !explosionActive) {
+            Mix_PlayChannel(-1, explosionSound, 0);
+
+            explosionActive = true;
+            explosionFrame = 0;
+            explosionPos.x = enemy1.x;
+            explosionPos.y = enemy1.y;
+            explosionPos.w = 64;
+            explosionPos.h = 64;
+
+            player.x = 100;
+            player.y = 500;
+            score = score > 5 ? score - 5 : 0;
+        }
+
 
         SDL_SetRenderDrawColor(ren, 135, 206, 235, 255);
         SDL_RenderClear(ren);
@@ -237,8 +301,13 @@ int main(int argc, char* args[]) {
 
         SDL_RenderCopy(ren, coinTex, NULL, &coin);
         SDL_RenderCopy(ren, enemyTex, NULL, &enemy);
-        SDL_RenderCopy(ren, playerTex, NULL, &player);
+        SDL_RenderCopy(ren, enemy1Tex, NULL, &enemy1);
 
+        // desenha o player 
+        if (playerTex) {
+            SDL_RenderCopy(ren, playerTex, NULL, &player);
+        }  
+        
         // Desenhar porta se ativa
         if (portaAtiva) {
             SDL_SetRenderDrawColor(ren, 139, 69, 19, 255); // marrom
@@ -256,29 +325,55 @@ int main(int argc, char* args[]) {
             }
         }
 
+// --- Exibir texto do score ---
+    char scoreText[32];
+    sprintf(scoreText, "Moedas: %d", score);
+
+    SDL_Color cor = {255, 255, 255, 255}; // branco
+    SDL_Surface* surfaceTexto = TTF_RenderText_Blended(fonte, scoreText, cor);
+    SDL_Texture* texturaTexto = SDL_CreateTextureFromSurface(ren, surfaceTexto);
+
+    SDL_Rect destTexto = {10, 10, surfaceTexto->w, surfaceTexto->h}; // posição na tela
+    SDL_RenderCopy(ren, texturaTexto, NULL, &destTexto);
+
+    // Libera surface e textura temporária
+    SDL_FreeSurface(surfaceTexto);
+    SDL_DestroyTexture(texturaTexto);
+
         SDL_RenderPresent(ren);
         SDL_Delay(100); // controla a velocidade da explosão
     } 
 
     // --- Limpeza ---
     Mix_FreeChunk(coinSound);
+    Mix_FreeChunk(explosionSound);
+
     SDL_DestroyTexture(playerTex);
     SDL_DestroyTexture(enemyTex);
+    SDL_DestroyTexture(enemy1Tex);
     SDL_DestroyTexture(coinTex);
-    SDL_DestroyTexture(tilemap1Tex);//
-    SDL_DestroyTexture(tilemap2Tex);//
-    SDL_DestroyRenderer(ren);
-    SDL_DestroyWindow(win);
+    SDL_DestroyTexture(tilemap1Tex);
+    SDL_DestroyTexture(tilemap2Tex);
+    SDL_DestroyTexture(tilemap3Tex);
+    SDL_DestroyTexture(explosionTex);
+
     for (int i = 0; i < MAX_FASES; i++) {
         if (musicas[i]) {
             Mix_FreeMusic(musicas[i]);
         }
     }
+
     Mix_CloseAudio();
-    SDL_DestroyTexture(explosionTex);
-    Mix_FreeChunk(explosionSound);
     IMG_Quit();
+
+    // Fecha fonte e TTF
+    TTF_CloseFont(fonte);
+    TTF_Quit();
+
+    SDL_DestroyRenderer(ren);
+    SDL_DestroyWindow(win);
     SDL_Quit();
+
 
     return 0;
 }
